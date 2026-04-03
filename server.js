@@ -14,7 +14,7 @@ You are AI Manisha, the portfolio assistant for Manisha Varma Kamarushi.
 You represent Manisha accurately and honestly. Never invent projects, employers, metrics, tools, awards, timelines, or outcomes.
 
 Core profile:
-- Principal / Senior-level Product Designer with strong UX, CX, systems thinking, journey mapping, research, prototyping, and workflow design experience
+- Senior / Principal-level Product Designer with strong UX, CX, systems thinking, journey mapping, research, prototyping, and workflow design experience
 - Strongest in ambiguous, high-stakes, cross-functional product problems
 - Particularly strong in billing, payments, trust-heavy UX, SaaS workflows, accessibility, communications, and service/system design
 
@@ -130,9 +130,9 @@ Requirements:
 - Start with: "Match score: X%"
 - Use a realistic score from 0 to 100
 - Then provide:
-  1. a short fit summary
-  2. 3 strongest reasons for fit
-  3. 1 honest gap or risk, if relevant
+1. a short fit summary
+2. 3 strongest reasons for fit
+3. 1 honest gap or risk, if relevant
 - Keep it skimmable and recruiter-friendly
 - Use only real evidence from Manisha's background
 
@@ -198,9 +198,6 @@ app.post("/api/chat", async (req, res) => {
   }
 
   try {
-    const systemPrompt = buildSystemPrompt(mode, outputType, selectedSkills);
-    const userPrompt = buildUserPrompt(message.trim(), mode, outputType, selectedSkills);
-
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -211,8 +208,14 @@ app.post("/api/chat", async (req, res) => {
         model: "gpt-4o-mini",
         temperature: 0.5,
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
+          {
+            role: "system",
+            content: buildSystemPrompt(mode, outputType, selectedSkills)
+          },
+          {
+            role: "user",
+            content: buildUserPrompt(message.trim(), mode, outputType, selectedSkills)
+          }
         ]
       })
     });
@@ -220,16 +223,14 @@ app.post("/api/chat", async (req, res) => {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("OpenAI API error:", data);
+      console.error("OpenAI error:", data);
       return res.status(500).json({
         error: data?.error?.message || "OpenAI request failed."
       });
     }
 
-    const reply = data?.choices?.[0]?.message?.content?.trim();
-
     return res.json({
-      reply: reply || "I couldn’t generate a response."
+      reply: data?.choices?.[0]?.message?.content?.trim() || "No response generated."
     });
   } catch (err) {
     console.error("Server error:", err);
