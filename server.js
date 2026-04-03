@@ -255,12 +255,19 @@ app.post("/api/chat", async (req, res) => {
     if (!response.ok) {
       console.error("OpenAI error:", data);
       return res.status(500).json({
-        error: data?.error?.message || "OpenAI request failed."
+        error: data && data.error && data.error.message ? data.error.message : "OpenAI request failed."
       });
     }
 
     return res.json({
-      reply: data?.choices?.[0]?.message?.content?.trim() || "No response generated."
+      reply:
+        data &&
+        data.choices &&
+        data.choices[0] &&
+        data.choices[0].message &&
+        data.choices[0].message.content
+          ? data.choices[0].message.content.trim()
+          : "No response generated."
     });
   } catch (err) {
     console.error("Server error:", err);
@@ -271,5 +278,5 @@ app.post("/api/chat", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(\`Server running on port \${PORT}\`);
+  console.log("Server running on port " + PORT);
 });
