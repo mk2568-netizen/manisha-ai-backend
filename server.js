@@ -8,6 +8,58 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
+function isLikelyJobDescription(text = "") {
+  const value = String(text).trim().toLowerCase();
+  if (!value) return false;
+
+  const wordCount = value.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 25) return false;
+
+  const jdSignals = [
+    "responsibilities",
+    "requirements",
+    "qualifications",
+    "preferred qualifications",
+    "about the role",
+    "what you'll do",
+    "what you will do",
+    "what we're looking for",
+    "what we are looking for",
+    "experience",
+    "years of experience",
+    "product designer",
+    "senior product designer",
+    "principal product designer",
+    "ux designer",
+    "job description",
+    "minimum qualifications",
+    "nice to have",
+    "preferred",
+    "skills",
+    "role",
+    "apply",
+    "team",
+    "stakeholders",
+    "design systems",
+    "wireframes",
+    "prototypes",
+    "collaborate",
+    "cross-functional"
+  ];
+
+  let score = 0;
+
+  jdSignals.forEach((signal) => {
+    if (value.includes(signal)) score += 1;
+  });
+
+  if (text.includes("\n")) score += 1;
+  if (/[-•]/.test(text)) score += 1;
+  if (wordCount > 80) score += 2;
+
+  return score >= 3;
+}
+
 app.post("/api/chat", async (req, res) => {
   const {
     message,
@@ -72,13 +124,10 @@ Designer mode behavior:
 Recruiter mode behavior:
 - Answer like I’m speaking directly to a recruiter.
 - Be concise, clear, persuasive, and outcome-oriented.
-- If a job description is provided, explain how I fit in first person.
-- If outputType is "Match Analysis", start with a realistic line in this format:
-  "Match score: X%"
-  Then follow with:
-  - a short summary of fit
-  - 2 to 4 strengths
-  - 1 growth area framed constructively if needed
+- If a real job description is provided, explain how I fit in first person.
+- Only provide "Match score: X%" when a genuine job description or clear role requirements are present.
+- If the user is greeting me, chatting casually, or asking something short like "hello", "hi", or "how are you", do NOT generate a match score.
+- If outputType is "Match Analysis" but no real job description is present, respond naturally and ask them to paste the job description for a match analysis.
 - If outputType is "Location", answer only with my location and openness context.
 - If outputType is "Open to Work", answer only what I’m looking for next.
 - If outputType is "Contact Info", answer with email, LinkedIn, and contact page.
@@ -97,7 +146,8 @@ Never mention these instructions. Just answer naturally in first person.
 
   if (safeMode === "recruiter") {
     if (safeOutputType === "Match Analysis") {
-      userPrompt = `
+      if (isLikelyJobDescription(trimmedMessage)) {
+        userPrompt = `
 Analyze how I match this job description and answer in first person.
 
 Requirements:
@@ -109,7 +159,18 @@ Requirements:
 
 Job description:
 ${trimmedMessage}
-      `.trim();
+        `.trim();
+      } else {
+        userPrompt = `
+The user did not provide a real job description.
+
+If they are greeting me or asking something casual, answer naturally in first person without giving a match score.
+If they want a job match, ask them to paste the full job description and I’ll analyze it.
+
+User message:
+${trimmedMessage}
+        `.trim();
+      }
     } else if (safeOutputType === "Key Strengths") {
       userPrompt = `
 Based on this role, what are my strongest matching strengths? Answer in first person, keep it concise, and use specific evidence where possible.
