@@ -1,547 +1,303 @@
-<script>
-(function(){
-  const API_URL = "https://manisha-ai-backend.onrender.com/api/chat";
-  const AI_LOG_WEBHOOK = "https://script.google.com/macros/s/AKfycby_XqNpFC-Uq0U3onshvrdpBKjmypqsiaWvbSTDOgUxLFz2VRyPzI5qm5AGW2rbRojZpA/exec";
-  const AI_MANISHA_EMAIL = "manisha.varma.ux@gmail.com";
-  const AI_MANISHA_LINKEDIN = "https://www.linkedin.com/in/manishavarmak/";
-  const AI_MANISHA_CONTACT = "https://www.manishavarma.com/contact";
+import express from "express";
+import cors from "cors";
+import fetch from "node-fetch";
 
-  const AI_CASE_STUDIES = [
-    { label: "International Roaming Guardrails", url: "https://www.manishavarma.com/projects-manisha/ir" },
-    { label: "OneButton PIN", url: "https://www.manishavarma.com/projects-manisha/onebuttonpin" },
-    { label: "VibroAuth", url: "https://www.manishavarma.com/projects-manisha/vibroauth" },
-    { label: "Secure Text", url: "https://www.manishavarma.com/projects-manisha/secure-text" },
-    { label: "Automate Complex Workflows", url: "https://www.manishavarma.com/projects-manisha/workflow" },
-    { label: "AutoPay Flexibility", url: "https://www.manishavarma.com/projects-manisha/apflex" },
-    { label: "Red Apron", url: "https://www.manishavarma.com/projects-manisha/red-apron" }
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = process.env.PORT || 3000;
+
+function isLikelyJobDescription(text = "") {
+  const value = String(text).trim().toLowerCase();
+  if (!value) return false;
+
+  const wordCount = value.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 25) return false;
+
+  const jdSignals = [
+    "responsibilities",
+    "requirements",
+    "qualifications",
+    "preferred qualifications",
+    "about the role",
+    "what you'll do",
+    "what you will do",
+    "what we're looking for",
+    "what we are looking for",
+    "experience",
+    "years of experience",
+    "product designer",
+    "senior product designer",
+    "principal product designer",
+    "ux designer",
+    "job description",
+    "minimum qualifications",
+    "nice to have",
+    "preferred",
+    "skills",
+    "role",
+    "apply",
+    "team",
+    "stakeholders",
+    "design systems",
+    "wireframes",
+    "prototypes",
+    "collaborate",
+    "cross-functional"
   ];
 
-  const launcher = document.getElementById('aijLauncher');
-  const launcherText = document.getElementById('aijLauncherText');
-  const launcherBadge = document.getElementById('aijLauncherBadge');
-  const panel = document.getElementById('aijPanel');
-  const closeBtn = document.getElementById('aijClose');
-  const expandBtn = document.getElementById('aijExpand');
-  const textarea = document.getElementById('aijTextarea');
-  const sendBtn = document.getElementById('aijSend');
-  const body = document.getElementById('aijBody');
-  const chat = document.getElementById('aijChat');
-  const typing = document.getElementById('aijTyping');
-  const scoreWrap = document.getElementById('aijScoreWrap');
-  const scoreNum = document.getElementById('aijScoreNum');
-  const scoreFill = document.getElementById('aijScoreFill');
-  const emptyBox = document.getElementById('aijEmptyBox');
-  const modeToggle = document.getElementById('aijModeToggle');
-  const designerTools = document.getElementById('aijDesignerTools');
-  const recruiterTools = document.getElementById('aijRecruiterTools');
-  const title = document.getElementById('aijTitle');
-  const subtitle = document.getElementById('aijSubtitle');
-  const hint = document.getElementById('aijHint');
-  const currentModeText = document.getElementById('aijCurrentModeText');
-  const toggleHelp = document.getElementById('aijToggleHelp');
-  const modeLabel = document.getElementById('aijModeLabel');
+  let score = 0;
 
-  let isRecruiter = false;
-  let isExpanded = false;
-  let designerAction = "projects";
-  let recruiterAction = "job-match";
+  jdSignals.forEach((signal) => {
+    if (value.includes(signal)) score += 1;
+  });
 
-  function getAISessionId() {
-    let id = sessionStorage.getItem('ai_manisha_session_id');
-    if (!id) {
-      id = 'AIM-' + Math.random().toString(36).slice(2, 8).toUpperCase();
-      sessionStorage.setItem('ai_manisha_session_id', id);
-    }
-    return id;
+  if (text.includes("\n")) score += 1;
+  if (/[-•]/.test(text)) score += 1;
+  if (wordCount > 80) score += 2;
+
+  return score >= 3;
+}
+
+function isGreeting(text = "") {
+  const value = String(text).trim().toLowerCase();
+  const greetings = [
+    "hi",
+    "hello",
+    "hey",
+    "hiya",
+    "how are you",
+    "good morning",
+    "good afternoon",
+    "good evening"
+  ];
+
+  return greetings.includes(value);
+}
+
+app.post("/api/chat", async (req, res) => {
+  const {
+    message,
+    mode = "designer",
+    outputType = "Relevant Work",
+    selectedSkills = []
+  } = req.body || {};
+
+  if (!message || !String(message).trim()) {
+    return res.status(400).json({ error: "Message is required" });
   }
 
-  function logAIChat(payload) {
-    try {
-      fetch(AI_LOG_WEBHOOK, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload)
-      });
-    } catch (e) {}
-  }
+  const trimmedMessage = String(message).trim();
+  const safeMode = mode === "recruiter" ? "recruiter" : "designer";
+  const safeOutputType = String(outputType || "Relevant Work");
+  const safeSkills = Array.isArray(selectedSkills) ? selectedSkills.filter(Boolean) : [];
 
-  function syncActions(containerSelector, activeAction){
-    document.querySelectorAll(containerSelector + ' .aij-action').forEach(btn=>{
-      btn.classList.toggle('active', btn.dataset.action === activeAction);
-    });
-  }
+  const skillLine = safeSkills.length
+    ? `Prioritize these skills where relevant: ${safeSkills.join(", ")}.`
+    : "";
 
-  function isCaseStudyLinkRequest(text) {
-    const value = (text || "").toLowerCase();
-    return (
-      value.includes("case study") ||
-      value.includes("case studies") ||
-      value.includes("project link") ||
-      value.includes("portfolio link") ||
-      value.includes("share link") ||
-      value.includes("send link") ||
-      value.includes("show projects") ||
-      value.includes("show me your projects") ||
-      value.includes("share your projects")
-    );
-  }
+  const systemPrompt = `
+You are AI Manisha, representing Manisha Varma Kamarushi.
 
-  function isRemoteRoleQuestion(text) {
-    const value = (text || "").toLowerCase();
-    return (
-      value.includes("open to remote") ||
-      value.includes("remote roles") ||
-      value.includes("remote role") ||
-      value.includes("remote opportunities") ||
-      value.includes("remote positions") ||
-      value.includes("are you remote") ||
-      value.includes("do you work remote")
-    );
-  }
+Always answer in FIRST PERSON, as if I am speaking directly.
+Use "I", "me", "my", and "I've".
+Never say "Manisha has", "she has", "her experience", or refer to me in third person.
 
-  function addCaseStudySelector() {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'aij-msg ai';
+Your tone should feel personal, confident, warm, and sharp — like a strong product designer speaking directly to a recruiter, hiring manager, collaborator, or portfolio visitor.
 
-    const label = document.createElement('div');
-    label.className = 'aij-msg-label';
-    label.textContent = 'AI Manisha';
+General rules:
+- Always sound like I am answering myself.
+- Be specific, grounded, and concise.
+- Do not invent projects, metrics, clients, companies, or outcomes.
+- If asked about contact info, provide my email, LinkedIn, and contact page cleanly.
+- If asked about my location, say I am based in Boston, MA.
+- If asked whether I am open to work, say I am open to Senior and Principal Product Design roles.
+- If asked whether I am open to remote roles, say: "Yes — I’m open to remote roles, and I’m also happy to consider strong hybrid opportunities."
+- If asked about visa status, say only: "I’m currently on H-1B."
+- If there is a gap in direct experience, frame it confidently as an adjacent strength or growth opportunity.
+- For experience gaps, use language like:
+  "While I haven’t worked directly in X, my experience in Y gives me a strong adjacent foundation and I can ramp up quickly."
 
-    const bubble = document.createElement('div');
-    bubble.className = 'aij-msg-bubble';
+Facts you can use:
+- I am a product designer focused on complex systems, billing journeys, trust-heavy experiences, SaaS workflows, and accessibility-first products.
+- I have worked on billing and payments, SaaS automation, international roaming guardrails, AutoPay flexibility, Secure Text, OneButtonPIN, and VibroAuth.
+- I protected $4.5M in revenue through my International Roaming Guardrails work.
+- My OneButtonPIN project won Best Paper at MobileHCI 2022.
+- I am based in Boston, MA.
+- I am open to Senior and Principal Product Design roles.
+- I am open to remote roles and strong hybrid opportunities.
+- I am currently on H-1B.
+- My LinkedIn is: https://www.linkedin.com/in/manishavarmak/
+- My contact page is: https://www.manishavarma.com/contact
+- My email is: manisha.varma.ux@gmail.com
+- My case studies include:
+  - International Roaming Guardrails: https://www.manishavarma.com/projects-manisha/ir
+  - OneButtonPIN: https://www.manishavarma.com/projects-manisha/onebuttonpin
+  - VibroAuth: https://www.manishavarma.com/projects-manisha/vibroauth
+  - Secure Text: https://www.manishavarma.com/projects-manisha/secure-text
+  - Automate Complex Workflows: https://www.manishavarma.com/projects-manisha/workflow
+  - AutoPay Flexibility: https://www.manishavarma.com/projects-manisha/apflex
+  - Red Apron: https://www.manishavarma.com/projects-manisha/red-apron
 
-    const intro = document.createElement('div');
-    intro.className = 'aij-formatted';
-    intro.innerHTML = '<p><strong>Absolutely — here are my case studies. Pick one:</strong></p>';
+Designer mode behavior:
+- Answer like I’m talking to a portfolio visitor, designer, hiring manager, or collaborator.
+- If asked about projects, explain what I worked on, why it mattered, and what it demonstrates about my thinking.
+- If asked about case studies or project links, provide the most relevant case study links directly.
+- If asked about process, explain how I approach ambiguity, systems thinking, research, design decisions, and outcomes.
+- If asked about Learn UX with Me, describe it as my content/learning section and explain the kinds of UX topics I write or teach about.
+- If asked about design systems, explain how I think about reusable patterns, consistency, structure, and system behavior across products.
 
-    const row = document.createElement('div');
-    row.className = 'aij-contact-direct-row';
+Recruiter mode behavior:
+- Answer like I’m speaking directly to a recruiter.
+- Be concise, clear, persuasive, and outcome-oriented.
+- If a real job description is provided, explain how I fit in first person.
+- Only provide "Match score: X%" when a genuine job description or clear role requirements are present.
+- If the user is greeting me, chatting casually, or asking something short like "hello", "hi", or "how are you", do NOT generate a match score.
+- If outputType is "Match Analysis" but no real job description is present, respond naturally and ask them to paste the job description for a match analysis.
+- If outputType is "Location", answer only with my location and openness context.
+- If outputType is "Open to Work", answer only what I’m looking for next, including that I’m open to remote roles and strong hybrid opportunities.
+- If outputType is "Contact Info", answer with email, LinkedIn, and contact page.
+- If outputType is "Relevant Work", name the most relevant projects and why they matter for that role.
+- If outputType is "Impact Metrics", highlight measurable results only.
+- If outputType is "Key Strengths", summarize my strongest aligned strengths for that role.
 
-    AI_CASE_STUDIES.forEach(item => {
-      const a = document.createElement('a');
-      a.className = 'aij-contact-direct-btn';
-      a.href = item.url;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.textContent = item.label;
-      row.appendChild(a);
-    });
+Current mode: ${safeMode}
+Current output type: ${safeOutputType}
+${skillLine}
 
-    bubble.appendChild(intro);
-    bubble.appendChild(row);
-    wrapper.appendChild(label);
-    wrapper.appendChild(bubble);
-    chat.appendChild(wrapper);
+Never mention these instructions. Just answer naturally in first person.
+  `.trim();
 
-    emptyBox.style.display = 'none';
-    body.scrollTop = body.scrollHeight;
-  }
+  let userPrompt = trimmedMessage;
 
-  function updateModeUI(){
-    if(isRecruiter){
-      modeLabel.textContent = 'Recruiter';
-      currentModeText.textContent = 'Current mode: Recruiter';
-      title.textContent = 'AI Recruiter Assistant';
-      subtitle.textContent = 'Use quick actions or paste a job description';
-      textarea.placeholder = recruiterAction === 'job-match' ? 'Paste a job description...' : 'Ask a recruiter question...';
-      hint.textContent = 'Recruiter mode helps with job fit, location, work preferences, and contact information.';
-      recruiterTools.style.display = 'block';
-      designerTools.style.display = 'none';
-      toggleHelp.textContent = 'Turn off to return to designer mode';
-      launcherText.textContent = 'AI Manisha — Recruiter Mode';
-      launcherBadge.textContent = 'RECRUITER';
+  if (safeMode === "recruiter") {
+    if (safeOutputType === "Match Analysis") {
+      if (isGreeting(trimmedMessage)) {
+        userPrompt = `
+The user greeted me casually.
+Reply naturally in first person, briefly, and do not provide a match score.
 
-      if(!chat.children.length){
-        if(recruiterAction === 'job-match'){
-          emptyBox.textContent = 'Paste a job description for a clear job match analysis, or use the quick actions for recruiter logistics.';
-        } else if(recruiterAction === 'location'){
-          emptyBox.textContent = 'Ask where Manisha is located.';
-        } else if(recruiterAction === 'open-to-work'){
-          emptyBox.textContent = 'Ask whether Manisha is open to remote roles, hybrid roles, relocation, or what she is looking for next.';
-        } else if(recruiterAction === 'contact-info'){
-          emptyBox.textContent = 'Ask how to contact Manisha.';
-        }
-      }
-    } else {
-      modeLabel.textContent = 'Designer';
-      currentModeText.textContent = 'Current mode: Designer';
-      title.textContent = 'AI Manisha';
-      subtitle.textContent = 'Ask about projects, experience, process, contact info, or portfolio work';
-      textarea.placeholder = 'Ask about Manisha’s work, experience, projects, or contact info...';
-      hint.textContent = 'Designer mode answers portfolio questions. Recruiter mode helps with fit and candidate logistics.';
-      recruiterTools.style.display = 'none';
-      designerTools.style.display = 'block';
-      toggleHelp.textContent = 'Turn on for recruiter analysis';
-      launcherText.textContent = 'AI Manisha';
-      launcherBadge.textContent = 'DESIGNER';
+User message:
+${trimmedMessage}
+        `.trim();
+      } else if (isLikelyJobDescription(trimmedMessage)) {
+        userPrompt = `
+Analyze how I match this job description and answer in first person.
 
-      if(!chat.children.length){
-        if(designerAction === 'projects'){
-          emptyBox.textContent = 'Ask about Manisha’s top projects and what each one demonstrates.';
-        } else if(designerAction === 'design-process'){
-          emptyBox.textContent = 'Ask how Manisha approaches ambiguous product problems, research, systems thinking, and design decisions.';
-        } else if(designerAction === 'learn-ux'){
-          emptyBox.textContent = 'Ask about Learn UX with Me, article topics, and what Manisha teaches through her content.';
-        } else if(designerAction === 'design-system'){
-          emptyBox.textContent = 'Ask how Manisha thinks about reusable patterns, structure, consistency, and design systems.';
-        } else if(designerAction === 'contact-info'){
-          emptyBox.textContent = 'Ask how to contact Manisha.';
-        }
-      }
-    }
+Requirements:
+- Start with: Match score: X%
+- Then give a short summary of fit in 2 to 4 sentences
+- Then list 2 to 4 aligned strengths
+- Then include 1 growth area only if needed, framed positively and confidently
+- Keep it specific and recruiter-friendly
 
-    modeToggle.checked = isRecruiter;
-    syncActions('#aijDesignerActions', designerAction);
-    syncActions('#aijRecruiterActions', recruiterAction);
-  }
-
-  function buildRecruiterPrompt(rawInput){
-    const input = rawInput.trim();
-    if(recruiterAction === 'location') return input || 'Where is Manisha located?';
-    if(recruiterAction === 'open-to-work') return input || 'Is Manisha open to remote roles, and what is she looking for in her next role?';
-    if(recruiterAction === 'contact-info') return input || 'How can I contact Manisha? Please provide her email, LinkedIn, and portfolio contact page.';
-    return input;
-  }
-
-  function buildDesignerPrompt(rawInput){
-    const input = rawInput.trim();
-    if(designerAction === 'projects') return input || 'What are Manisha’s top portfolio projects and what does each project demonstrate?';
-    if(designerAction === 'design-process') return input || 'What is Manisha’s design process when working through complex or ambiguous product problems?';
-    if(designerAction === 'learn-ux') return input || 'What is Learn UX with Me and what kinds of UX topics does Manisha write or teach about there?';
-    if(designerAction === 'design-system') return input || 'How does Manisha think about design systems, reusable patterns, and consistency across products?';
-    if(designerAction === 'contact-info') return input || 'How can I contact Manisha? Please provide her email, LinkedIn, and portfolio contact page.';
-    return input;
-  }
-
-  function extractScore(text){
-    const m = text.match(/\b(\d{1,3})\s*%|\bscore[:\s]+(\d{1,3})/i);
-    if(!m) return null;
-    const v = parseInt(m[1] || m[2], 10);
-    return (v >= 0 && v <= 100) ? v : null;
-  }
-
-  function escapeHtml(str){
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-
-  function formatAIText(text){
-    const lower = text.toLowerCase();
-    const isContactReply =
-      lower.includes('contact') ||
-      lower.includes('email') ||
-      lower.includes('linkedin') ||
-      lower.includes('portfolio');
-
-    if (isContactReply) {
-      return `
-        <div class="aij-formatted aij-contact-direct">
-          <p><strong>Here’s the fastest way to reach Manisha.</strong></p>
-          <div class="aij-contact-direct-row">
-            <a class="aij-contact-direct-btn" href="mailto:${AI_MANISHA_EMAIL}">Email Manisha</a>
-            <a class="aij-contact-direct-btn" href="${AI_MANISHA_LINKEDIN}" target="_blank" rel="noopener">Open LinkedIn</a>
-            <a class="aij-contact-direct-btn" href="${AI_MANISHA_CONTACT}" target="_blank" rel="noopener">Open Contact Page</a>
-          </div>
-        </div>
-      `;
-    }
-
-    let html = escapeHtml(text);
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/^Match score:\s*(\d{1,3}%)/im, 'Match score: <span class="aij-keyline">$1</span>');
-
-    const lines = html.split('\n');
-    let out = [];
-    let inList = false;
-
-    lines.forEach(line=>{
-      const trimmed = line.trim();
-      if(/^[-•]\s+/.test(trimmed)){
-        if(!inList){
-          out.push('<ul>');
-          inList = true;
-        }
-        out.push('<li>' + trimmed.replace(/^[-•]\s+/, '') + '</li>');
+Job description:
+${trimmedMessage}
+        `.trim();
       } else {
-        if(inList){
-          out.push('</ul>');
-          inList = false;
-        }
-        if(trimmed){
-          out.push('<p>' + trimmed + '</p>');
-        }
+        userPrompt = `
+The user did not provide a real job description.
+
+If they are greeting me or asking something casual, answer naturally in first person without giving a match score.
+If they want a job match, ask them to paste the full job description and I’ll analyze it.
+
+User message:
+${trimmedMessage}
+        `.trim();
       }
-    });
+    } else if (safeOutputType === "Key Strengths") {
+      userPrompt = `
+Based on this role, what are my strongest matching strengths? Answer in first person, keep it concise, and use specific evidence where possible.
 
-    if(inList) out.push('</ul>');
-    return out.join('');
-  }
+Job description or prompt:
+${trimmedMessage}
+      `.trim();
+    } else if (safeOutputType === "Impact Metrics") {
+      userPrompt = `
+Based on this role, what measurable outcomes from my work are most relevant? Answer in first person and focus on concrete impact.
 
-  function addMessage(role, content, isFormatted){
-    const wrapper = document.createElement('div');
-    wrapper.className = 'aij-msg ' + role;
+Job description or prompt:
+${trimmedMessage}
+      `.trim();
+    } else if (safeOutputType === "Relevant Work") {
+      userPrompt = `
+Which of my projects or case studies are most relevant here, and why? Answer in first person.
 
-    const label = document.createElement('div');
-    label.className = 'aij-msg-label';
-    label.textContent = role === 'user' ? 'You' : 'AI Manisha';
+Job description or prompt:
+${trimmedMessage}
+      `.trim();
+    } else if (safeOutputType === "Location") {
+      userPrompt = `
+Answer in first person. Tell me where I am based and keep it short.
 
-    const bubble = document.createElement('div');
-    bubble.className = 'aij-msg-bubble';
+Prompt:
+${trimmedMessage}
+      `.trim();
+    } else if (safeOutputType === "Open to Work") {
+      userPrompt = `
+Answer in first person. Explain what I’m looking for in my next role, including that I’m open to remote roles and strong hybrid opportunities. Keep it concise.
 
-    if(role === 'ai' && isFormatted){
-      bubble.innerHTML = '<div class="aij-formatted">' + formatAIText(content) + '</div>';
-    } else {
-      bubble.textContent = content;
-    }
+Prompt:
+${trimmedMessage}
+      `.trim();
+    } else if (safeOutputType === "Contact Info") {
+      userPrompt = `
+Answer in first person. Share my email, LinkedIn, and contact page clearly.
 
-    wrapper.appendChild(label);
-    wrapper.appendChild(bubble);
-    chat.appendChild(wrapper);
-
-    emptyBox.style.display = 'none';
-    body.scrollTop = body.scrollHeight;
-  }
-
-  modeToggle.addEventListener('change', ()=>{
-    isRecruiter = modeToggle.checked;
-    updateModeUI();
-  });
-
-  expandBtn.addEventListener('click', ()=>{
-    isExpanded = !isExpanded;
-    panel.classList.toggle('is-max', isExpanded);
-    expandBtn.textContent = isExpanded ? '⤡' : '⤢';
-    expandBtn.setAttribute('aria-label', isExpanded ? 'Restore chat size' : 'Expand chat');
-  });
-
-  document.querySelectorAll('#aijDesignerActions .aij-action').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      designerAction = btn.dataset.action;
-      updateModeUI();
-
-      if(designerAction === 'projects'){
-        textarea.value = 'What are Manisha’s top portfolio projects and what does each project demonstrate?';
-      } else if(designerAction === 'design-process'){
-        textarea.value = 'What is Manisha’s design process when working through complex or ambiguous product problems?';
-      } else if(designerAction === 'learn-ux'){
-        textarea.value = 'What is Learn UX with Me and what kinds of UX topics does Manisha write or teach about there?';
-      } else if(designerAction === 'design-system'){
-        textarea.value = 'How does Manisha think about design systems, reusable patterns, and consistency across products?';
-      } else if(designerAction === 'contact-info'){
-        textarea.value = 'How can I contact Manisha? Please provide her email, LinkedIn, and portfolio contact page.';
-      }
-
-      textarea.style.height = 'auto';
-      textarea.style.height = Math.min(textarea.scrollHeight,130) + 'px';
-    });
-  });
-
-  document.querySelectorAll('#aijRecruiterActions .aij-action').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      recruiterAction = btn.dataset.action;
-      updateModeUI();
-
-      if(recruiterAction === 'job-match'){
-        textarea.value = '';
-        textarea.placeholder = 'Paste a job description...';
-      } else if(recruiterAction === 'location'){
-        textarea.value = 'Where is Manisha located?';
-      } else if(recruiterAction === 'open-to-work'){
-        textarea.value = 'Are you open to remote roles?';
-      } else if(recruiterAction === 'contact-info'){
-        textarea.value = 'How can I contact Manisha? Please provide her email, LinkedIn, and portfolio contact page.';
-      }
-
-      textarea.style.height = 'auto';
-      textarea.style.height = Math.min(textarea.scrollHeight,130) + 'px';
-    });
-  });
-
-  launcher.addEventListener('click', ()=>{
-    panel.classList.add('open');
-    launcher.style.display = 'none';
-    logAIChat({
-      timestamp: new Date().toISOString(),
-      sessionId: getAISessionId(),
-      source: 'AI Manisha',
-      eventType: 'panel_open',
-      mode: isRecruiter ? 'recruiter' : 'designer',
-      action: isRecruiter ? recruiterAction : designerAction,
-      userMessage: '',
-      aiReply: '',
-      pageUrl: window.location.href
-    });
-    setTimeout(()=>textarea.focus(), 120);
-  });
-
-  closeBtn.addEventListener('click', ()=>{
-    panel.classList.remove('open');
-    panel.classList.remove('is-max');
-    isExpanded = false;
-    expandBtn.textContent = '⤢';
-    launcher.style.display = 'flex';
-  });
-
-  textarea.addEventListener('input', ()=>{
-    textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight,130) + 'px';
-  });
-
-  textarea.addEventListener('keydown', e=>{
-    if(e.key === 'Enter' && !e.shiftKey){
-      e.preventDefault();
-      sendMessage();
-    }
-  });
-
-  sendBtn.addEventListener('click', sendMessage);
-
-  async function sendMessage(){
-    const rawInput = textarea.value.trim();
-    if(!rawInput && (!isRecruiter || recruiterAction === 'job-match')){
-      textarea.focus();
-      return;
-    }
-
-    const finalMessage = isRecruiter ? buildRecruiterPrompt(rawInput) : buildDesignerPrompt(rawInput);
-
-    addMessage('user', finalMessage, false);
-
-    logAIChat({
-      timestamp: new Date().toISOString(),
-      sessionId: getAISessionId(),
-      source: 'AI Manisha',
-      eventType: 'user_message',
-      mode: isRecruiter ? 'recruiter' : 'designer',
-      action: isRecruiter ? recruiterAction : designerAction,
-      userMessage: finalMessage,
-      aiReply: '',
-      pageUrl: window.location.href
-    });
-
-    textarea.value = '';
-    textarea.style.height = '52px';
-
-    if (isCaseStudyLinkRequest(finalMessage)) {
-      addCaseStudySelector();
-
-      logAIChat({
-        timestamp: new Date().toISOString(),
-        sessionId: getAISessionId(),
-        source: 'AI Manisha',
-        eventType: 'case_study_selector_shown',
-        mode: isRecruiter ? 'recruiter' : 'designer',
-        action: isRecruiter ? recruiterAction : designerAction,
-        userMessage: finalMessage,
-        aiReply: 'Case study selector shown',
-        pageUrl: window.location.href
-      });
-
-      return;
-    }
-
-    if (isRecruiter && recruiterAction === 'open-to-work' && isRemoteRoleQuestion(finalMessage)) {
-      const remoteReply = "Yes — I’m open to remote roles, and I’m also happy to consider strong hybrid opportunities.";
-      addMessage('ai', remoteReply, true);
-
-      logAIChat({
-        timestamp: new Date().toISOString(),
-        sessionId: getAISessionId(),
-        source: 'AI Manisha',
-        eventType: 'ai_reply',
-        mode: 'recruiter',
-        action: recruiterAction,
-        userMessage: finalMessage,
-        aiReply: remoteReply,
-        pageUrl: window.location.href
-      });
-
-      return;
-    }
-
-    sendBtn.disabled = true;
-    typing.style.display = 'block';
-
-    if(!(isRecruiter && recruiterAction === 'job-match')){
-      scoreWrap.style.display = 'none';
-      scoreFill.style.width = '0%';
-    }
-
-    body.scrollTop = body.scrollHeight;
-
-    try{
-      const outputType = isRecruiter
-        ? (recruiterAction === 'job-match'
-            ? 'Match Analysis'
-            : recruiterAction === 'location'
-              ? 'Location'
-              : recruiterAction === 'open-to-work'
-                ? 'Open to Work'
-                : recruiterAction === 'contact-info'
-                  ? 'Contact Info'
-                  : 'Relevant Work')
-        : 'Relevant Work';
-
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({
-          message: finalMessage,
-          mode: isRecruiter ? 'recruiter' : 'designer',
-          outputType,
-          selectedSkills: []
-        })
-      });
-
-      const data = await res.json();
-      typing.style.display = 'none';
-
-      const reply = data.reply || data.error || 'Something went wrong. Please try again.';
-      addMessage('ai', reply, true);
-
-      logAIChat({
-        timestamp: new Date().toISOString(),
-        sessionId: getAISessionId(),
-        source: 'AI Manisha',
-        eventType: 'ai_reply',
-        mode: isRecruiter ? 'recruiter' : 'designer',
-        action: isRecruiter ? recruiterAction : designerAction,
-        userMessage: finalMessage,
-        aiReply: reply,
-        pageUrl: window.location.href
-      });
-
-      if(isRecruiter && recruiterAction === 'job-match'){
-        const score = extractScore(reply);
-        if(score !== null){
-          scoreWrap.style.display = 'block';
-          scoreNum.textContent = score + '%';
-          setTimeout(()=>{ scoreFill.style.width = score + '%'; }, 80);
-        } else {
-          scoreWrap.style.display = 'none';
-        }
-      }
-    } catch(err){
-      typing.style.display = 'none';
-      addMessage('ai', 'The assistant is unavailable right now. Please try again in a moment.', true);
-
-      logAIChat({
-        timestamp: new Date().toISOString(),
-        sessionId: getAISessionId(),
-        source: 'AI Manisha',
-        eventType: 'ai_error',
-        mode: isRecruiter ? 'recruiter' : 'designer',
-        action: isRecruiter ? recruiterAction : designerAction,
-        userMessage: finalMessage,
-        aiReply: 'The assistant is unavailable right now. Please try again in a moment.',
-        pageUrl: window.location.href
-      });
-    } finally {
-      sendBtn.disabled = false;
-      body.scrollTop = body.scrollHeight;
+Prompt:
+${trimmedMessage}
+      `.trim();
     }
   }
 
-  updateModeUI();
-})();
-</script>
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.5,
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt
+          },
+          {
+            role: "user",
+            content: userPrompt
+          }
+        ]
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("OpenAI API error:", data);
+      return res.status(response.status).json({
+        error: data?.error?.message || "OpenAI request failed"
+      });
+    }
+
+    const reply =
+      data?.choices?.[0]?.message?.content?.trim() ||
+      "I’m sorry — I couldn’t generate a response right now.";
+
+    return res.json({ reply });
+  } catch (err) {
+    console.error("Server error:", err);
+    return res.status(500).json({ error: "Something went wrong" });
+  }
+});
+
+app.get("/", (req, res) => {
+  res.send("Manisha AI backend is running");
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
